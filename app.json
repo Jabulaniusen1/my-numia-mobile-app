@@ -4,7 +4,7 @@
     "slug": "numia-mobile-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/app-icon.png",
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -12,12 +12,15 @@
     },
     "userInterfaceStyle": "light",
     "ios": {
+      "icon": "./assets/app-icon.png",
+      "bundleIdentifier": "com.numia.mobile",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.numia.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "foregroundImage": "./assets/app-icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -30,6 +33,12 @@
       "expo-font",
       "expo-secure-store",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "42ee83a2-3fbb-416f-a4d4-a88bb74c21dd"
+      }
+    },
+    "owner": "jabulani-usen"
   }
 }

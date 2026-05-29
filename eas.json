@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://my-numia-backend.onrender.com",
+        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.devnet.solana.com",
+        "EXPO_PUBLIC_SOLANA_PRICE_API_URL": "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://my-numia-backend.onrender.com",
+        "EXPO_PUBLIC_SOLANA_RPC_URL": "https://api.devnet.solana.com",
+        "EXPO_PUBLIC_SOLANA_PRICE_API_URL": "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+      }
+    }
+  }
+}
