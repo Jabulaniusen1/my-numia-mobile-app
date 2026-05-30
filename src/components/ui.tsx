@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -16,7 +16,15 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react-native'
-import { colors, fonts, radius, spacing } from '../theme/tokens'
+import { fonts, radius, spacing, type ThemeColors } from '../theme/tokens'
+import { useApp } from '../context/AppContext'
+
+function useUiTheme() {
+  const { themeColors } = useApp()
+  const styles = useMemo(() => createStyles(themeColors), [themeColors])
+
+  return { colors: themeColors, styles }
+}
 
 export function Screen({
   children,
@@ -29,6 +37,7 @@ export function Screen({
   style?: StyleProp<ViewStyle>
   flushBottom?: boolean
 }) {
+  const { styles } = useUiTheme()
   const safeEdges = flushBottom
     ? (['top', 'right', 'left'] as const)
     : (['top', 'right', 'bottom', 'left'] as const)
@@ -56,14 +65,17 @@ export function Screen({
 }
 
 export function Title({ children }: { children: React.ReactNode }) {
+  const { styles } = useUiTheme()
   return <Text style={styles.title}>{children}</Text>
 }
 
 export function Subtitle({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
+  const { styles } = useUiTheme()
   return <Text style={[styles.subtitle, style]}>{children}</Text>
 }
 
 export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  const { styles } = useUiTheme()
   return <View style={[styles.card, style]}>{children}</View>
 }
 
@@ -78,6 +90,7 @@ export function Skeleton({
   radius?: number
   style?: StyleProp<ViewStyle>
 }) {
+  const { styles } = useUiTheme()
   const opacity = useRef(new Animated.Value(0.56)).current
 
   useEffect(() => {
@@ -144,10 +157,11 @@ export function SkeletonText({
   )
 }
 
-export function IconBubble({ icon, color = colors.neonBlue, size = 20 }: { icon: IconSvgElement; color?: string; size?: number }) {
+export function IconBubble({ icon, color, size = 20 }: { icon: IconSvgElement; color?: string; size?: number }) {
+  const { colors, styles } = useUiTheme()
   return (
     <View style={styles.iconBubble}>
-      <HugeiconsIcon icon={icon} size={size} color={color} strokeWidth={1.8} />
+      <HugeiconsIcon icon={icon} size={size} color={color ?? colors.neonBlue} strokeWidth={1.8} />
     </View>
   )
 }
@@ -165,6 +179,7 @@ export function AppButton({
   disabled?: boolean
   loading?: boolean
 }) {
+  const { colors, styles } = useUiTheme()
   const isPrimary = variant === 'primary'
 
   return (
@@ -197,6 +212,8 @@ export function Input({
   placeholder,
   multiline,
   autoCapitalize = 'none',
+  keyboardType,
+  rightAccessory,
 }: {
   label: string
   value: string
@@ -204,16 +221,23 @@ export function Input({
   placeholder?: string
   multiline?: boolean
   autoCapitalize?: TextInputProps['autoCapitalize']
+  keyboardType?: TextInputProps['keyboardType']
+  rightAccessory?: React.ReactNode
 }) {
+  const { colors, styles } = useUiTheme()
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>{label}</Text>
+      <View style={styles.inputLabelRow}>
+        <Text style={styles.inputLabel}>{label}</Text>
+        {rightAccessory ? <View style={styles.inputAccessory}>{rightAccessory}</View> : null}
+      </View>
       <TextInput
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.textDim}
         autoCapitalize={autoCapitalize}
+        keyboardType={keyboardType}
         multiline={multiline}
         style={[styles.input, multiline && styles.inputMultiline]}
       />
@@ -222,10 +246,12 @@ export function Input({
 }
 
 export function Divider() {
+  const { styles } = useUiTheme()
   return <View style={styles.divider} />
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -270,7 +296,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   skeleton: {
-    backgroundColor: '#E8E0FA',
+    backgroundColor: colors.cardAlt,
   },
   iconBubble: {
     width: 40,
@@ -278,9 +304,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1EBFF',
+    backgroundColor: colors.cardAlt,
     borderWidth: 1,
-    borderColor: '#E2D6FF',
+    borderColor: colors.border,
   },
   buttonWrap: {
     borderRadius: radius.md,
@@ -312,10 +338,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#DCCFFF',
+    borderColor: colors.border,
   },
   buttonGhost: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderColor: colors.border,
   },
   buttonSecondaryText: {
@@ -329,6 +355,15 @@ const styles = StyleSheet.create({
   inputGroup: {
     gap: spacing.sm,
   },
+  inputLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  inputAccessory: {
+    alignItems: 'flex-end',
+  },
   inputLabel: {
     color: colors.text,
     fontFamily: fonts.regular,
@@ -336,7 +371,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bgSoft,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -352,6 +387,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#EEE7FF',
+    backgroundColor: colors.border,
   },
-})
+  })
+}

@@ -14,9 +14,16 @@ const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:
 const DEFAULT_SOLANA_RPC_URL = 'https://api.devnet.solana.com'
 const SOLANA_RPC_URL = process.env.EXPO_PUBLIC_SOLANA_RPC_URL ?? DEFAULT_SOLANA_RPC_URL
 const SOLANA_RPC_URLS = Array.from(new Set([SOLANA_RPC_URL, DEFAULT_SOLANA_RPC_URL]))
-const SOLANA_PRICE_URL =
-  process.env.EXPO_PUBLIC_SOLANA_PRICE_API_URL ??
-  'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd'
+const SOLANA_MINT_ADDRESS = 'So11111111111111111111111111111111111111112'
+const DEFAULT_SOLANA_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd'
+const SOLANA_PRICE_URLS = Array.from(new Set([
+  process.env.EXPO_PUBLIC_SOLANA_PRICE_API_URL,
+  DEFAULT_SOLANA_PRICE_URL,
+  'https://coins.llama.fi/prices/current/coingecko:solana',
+  'https://api.coinpaprika.com/v1/tickers/sol-solana?quotes=USD',
+  `https://lite-api.jup.ag/price/v3?ids=${SOLANA_MINT_ADDRESS}`,
+].filter((url): url is string => Boolean(url))))
+const SOLANA_PRICE_CACHE_MAX_AGE_MS = 5 * 60 * 1000
 
 function parseTimeoutMs(raw: string | undefined, fallback: number): number {
   const value = Number(raw)
@@ -26,8 +33,9 @@ function parseTimeoutMs(raw: string | undefined, fallback: number): number {
   return Math.trunc(value)
 }
 
-const API_TIMEOUT_MS = parseTimeoutMs(process.env.EXPO_PUBLIC_API_TIMEOUT_MS, 12000)
 const SOLANA_TIMEOUT_MS = parseTimeoutMs(process.env.EXPO_PUBLIC_SOLANA_TIMEOUT_MS, 10000)
+
+let cachedSolUsdPrice: { usd: number; updatedAt: number } | null = null
 
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT'
@@ -38,9 +46,6 @@ type RequestOptions = {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
   const { method = 'GET', body, token } = options
 
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
-
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       method,
@@ -48,7 +53,6 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      signal: controller.signal,
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
 
@@ -69,21 +73,76 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
     }
 
     return payload
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      return {
-        success: false,
-        error: `Request timed out after ${Math.round(API_TIMEOUT_MS / 1000)}s. Confirm backend URL and that your API server is running.`,
-      }
-    }
-
+  } catch {
     return {
       success: false,
       error:
         'Unable to reach NUMIA backend. Ensure API is running and EXPO_PUBLIC_API_BASE_URL is set correctly.',
     }
-  } finally {
-    clearTimeout(timeoutId)
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  return value as Record<string, unknown>
+}
+
+function parsePositiveNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : NaN
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function parseSolUsdPricePayload(payload: unknown): number | null {
+  const root = asRecord(payload)
+  if (!root) return null
+
+  const solana = asRecord(root.solana)
+  const coingeckoPrice = parsePositiveNumber(solana?.usd)
+  if (coingeckoPrice) return coingeckoPrice
+
+  const coins = asRecord(root.coins)
+  const llamaSolana = asRecord(coins?.['coingecko:solana'])
+  const llamaPrice = parsePositiveNumber(llamaSolana?.price)
+  if (llamaPrice) return llamaPrice
+
+  const quotes = asRecord(root.quotes)
+  const usdQuote = asRecord(quotes?.USD)
+  const coinPaprikaPrice = parsePositiveNumber(usdQuote?.price)
+  if (coinPaprikaPrice) return coinPaprikaPrice
+
+  const jupiterSolana = asRecord(root[SOLANA_MINT_ADDRESS])
+  const jupiterPrice = parsePositiveNumber(jupiterSolana?.usdPrice) ?? parsePositiveNumber(jupiterSolana?.price)
+  if (jupiterPrice) return jupiterPrice
+
+  const data = asRecord(root.data)
+  const coinbasePrice = parsePositiveNumber(data?.amount)
+  if (coinbasePrice) return coinbasePrice
+
+  const tickerPrice = parsePositiveNumber(root.price)
+  if (tickerPrice) return tickerPrice
+
+  return null
+}
+
+function getCachedSolUsdPrice(): ApiResponse<{ usd: number }> | null {
+  if (!cachedSolUsdPrice) return null
+
+  const ageMs = Date.now() - cachedSolUsdPrice.updatedAt
+  if (ageMs > SOLANA_PRICE_CACHE_MAX_AGE_MS) {
+    return null
+  }
+
+  return {
+    success: true,
+    data: { usd: cachedSolUsdPrice.usd },
   }
 }
 
@@ -282,35 +341,45 @@ export const api = {
   },
 
   async solUsdPrice(): Promise<ApiResponse<{ usd: number }>> {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), SOLANA_TIMEOUT_MS)
+    let lastError = 'Unable to fetch SOL/USD price right now.'
 
-    try {
-      const response = await fetch(SOLANA_PRICE_URL, { method: 'GET', signal: controller.signal })
-      const payload = await response.json().catch(() => null) as
-        | { solana?: { usd?: number } }
-        | null
+    for (const priceUrl of SOLANA_PRICE_URLS) {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), SOLANA_TIMEOUT_MS)
 
-      if (!response.ok || !payload) {
-        return { success: false, error: 'Unable to fetch SOL/USD price right now.' }
-      }
+      try {
+        const response = await fetch(priceUrl, { method: 'GET', signal: controller.signal })
+        const payload = await response.json().catch(() => null)
 
-      const usd = payload.solana?.usd
-      if (typeof usd !== 'number' || !Number.isFinite(usd) || usd <= 0) {
-        return { success: false, error: 'Invalid SOL/USD price response.' }
-      }
+        if (!response.ok || !payload) {
+          lastError = response.status === 429
+            ? 'SOL/USD price API is rate limited. Please retry shortly.'
+            : 'Unable to fetch SOL/USD price right now.'
+          continue
+        }
 
-      return {
-        success: true,
-        data: { usd },
+        const usd = parseSolUsdPricePayload(payload)
+        if (!usd) {
+          lastError = 'Invalid SOL/USD price response.'
+          continue
+        }
+
+        cachedSolUsdPrice = { usd, updatedAt: Date.now() }
+        return {
+          success: true,
+          data: { usd },
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          lastError = 'Price request timed out. Please retry.'
+        } else {
+          lastError = 'Unable to reach price API for SOL/USD.'
+        }
+      } finally {
+        clearTimeout(timeoutId)
       }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return { success: false, error: 'Price request timed out. Please retry.' }
-      }
-      return { success: false, error: 'Unable to reach price API for SOL/USD.' }
-    } finally {
-      clearTimeout(timeoutId)
     }
+
+    return getCachedSolUsdPrice() ?? { success: false, error: lastError }
   },
 }

@@ -7,13 +7,16 @@ import {
   loadActivity,
   loadOnboardingSeen,
   loadSession,
+  loadThemeMode,
   loadWallet,
   saveActivity,
   saveOnboardingSeen,
   saveSession,
+  saveThemeMode,
   saveWallet,
 } from '../services/storage'
 import type { Identity, LocalWallet, Session, TransferRecord, WalletAccount } from '../types/app'
+import { darkColors, lightColors, type ThemeColors, type ThemeMode } from '../theme/tokens'
 import {
   createWallet,
   importWalletByMnemonic,
@@ -45,6 +48,11 @@ interface AppContextValue {
   activity: TransferRecord[]
   linkedWallets: WalletAccount[]
   backendUrl: string
+  themeMode: ThemeMode
+  themeColors: ThemeColors
+  isDarkMode: boolean
+  setThemeMode: (mode: ThemeMode) => Promise<void>
+  toggleDarkMode: () => Promise<void>
   completeOnboarding: () => Promise<void>
   createLocalWallet: () => Promise<LocalWallet>
   importLocalWalletWithMnemonic: (mnemonic: string) => Promise<LocalWallet>
@@ -136,21 +144,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<Session | null>(null)
   const [activity, setActivity] = useState<TransferRecord[]>([])
   const [linkedWallets, setLinkedWallets] = useState<WalletAccount[]>([])
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('light')
   const registeredPushTokenRef = useRef<string | null>(null)
+  const isDarkMode = themeMode === 'dark'
+  const themeColors = isDarkMode ? darkColors : lightColors
 
   const bootstrap = useCallback(async () => {
     setBooting(true)
 
-    const [seen, storedWallet, storedSession, storedActivity] = await Promise.all([
+    const [seen, storedWallet, storedSession, storedActivity, storedThemeMode] = await Promise.all([
       loadOnboardingSeen(),
       loadWallet(),
       loadSession(),
       loadActivity(),
+      loadThemeMode(),
     ])
 
     setOnboardingSeen(seen)
     setWallet(storedWallet)
     setActivity(storedActivity)
+    setThemeModeState(storedThemeMode)
 
     if (storedSession?.token) {
       const me = await api.me(storedSession.token)
@@ -229,6 +242,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOnboardingSeen(true)
     await saveOnboardingSeen(true)
   }, [])
+
+  const setThemeMode = useCallback(async (mode: ThemeMode) => {
+    setThemeModeState(mode)
+    await saveThemeMode(mode)
+  }, [])
+
+  const toggleDarkMode = useCallback(async () => {
+    await setThemeMode(themeMode === 'dark' ? 'light' : 'dark')
+  }, [setThemeMode, themeMode])
 
   const setWalletAndResetAuth = useCallback(async (nextWallet: LocalWallet) => {
     await saveWallet(nextWallet)
@@ -585,6 +607,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     activity,
     linkedWallets,
     backendUrl: api.baseUrl,
+    themeMode,
+    themeColors,
+    isDarkMode,
+    setThemeMode,
+    toggleDarkMode,
     completeOnboarding,
     createLocalWallet,
     importLocalWalletWithMnemonic,
@@ -610,6 +637,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     createLocalWallet,
     importLocalWalletWithMnemonic,
     importLocalWalletWithPrivateKey,
+    isDarkMode,
     linkedWallets,
     logout,
     onboardingSeen,
@@ -619,7 +647,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     resolveRecipient,
     session,
     sendTransferIntent,
+    setThemeMode,
     signInWithWallet,
+    themeColors,
+    themeMode,
+    toggleDarkMode,
     updateCustomHandle,
     updateProfile,
     wallet,

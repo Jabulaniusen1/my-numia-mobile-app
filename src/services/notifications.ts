@@ -65,7 +65,7 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('money', {
-      name: 'Money received',
+      name: 'Money transfers',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#6D3BFF',

@@ -9,6 +9,7 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native'
@@ -18,15 +19,14 @@ import { useFonts } from 'expo-font'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react-native'
 import {
-  AiMagicIcon,
   ArrowDown02Icon,
   ArrowLeft01Icon,
   ArrowUpRight01Icon,
   Copy01Icon,
   DashboardSquare01Icon,
   IdentityCardIcon,
+  Moon02Icon,
   QrCode01Icon,
-  ShieldBlockchainIcon,
   UserSquareIcon,
   ViewIcon,
   ViewOffIcon,
@@ -47,7 +47,7 @@ import {
   Subtitle,
   Title,
 } from './src/components/ui'
-import { colors, fonts, radius, spacing } from './src/theme/tokens'
+import { colors as lightColors, fonts, radius, spacing, type ThemeColors } from './src/theme/tokens'
 import { api } from './src/services/api'
 import { loadBeneficiaries, saveBeneficiaries } from './src/services/storage'
 import type { Beneficiary, Identity, LocalWallet, TransferRecord } from './src/types/app'
@@ -57,9 +57,19 @@ import {
   dylanAvatarSvg,
   isRemoteAvatarUrl,
 } from './src/utils/avatar'
-import { createWallet, getWalletSeedWords, sendSolTransfer, shortAddress } from './src/utils/wallet'
+import {
+  SOL_TRANSFER_FEE_FALLBACK_LAMPORTS,
+  createWallet,
+  estimateSolTransferFeeLamports,
+  formatLamportsAsSol,
+  getWalletSeedWords,
+  parseSolAmountToLamports,
+  sendSolTransfer,
+  shortAddress,
+} from './src/utils/wallet'
 
 const Tab = createBottomTabNavigator()
+let colors: ThemeColors = lightColors
 
 type MainTabsParamList = {
   Home: undefined
@@ -77,16 +87,50 @@ const onboardingIdentityPreview = [
   { seed: 'zuri', handle: '@z5r3@numia' },
 ]
 
-const navTheme: Theme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: colors.bg,
-    card: '#FFFFFF',
-    border: colors.border,
-    text: colors.text,
-    primary: colors.neonPurple,
+const launchIdentityPreview = [
+  {
+    seed: 'amara-route',
+    handle: '@amara@numia',
+    wallet: '7Uv...9kQ',
+    status: 'Verified',
+    accent: '#0EA5A4',
   },
+  {
+    seed: 'kai-ledger',
+    handle: '@kai@numia',
+    wallet: '3Ns...R8p',
+    status: 'Linked',
+    accent: '#F59E0B',
+  },
+  {
+    seed: 'zola-secure',
+    handle: '@zola@numia',
+    wallet: '8Ta...2Lm',
+    status: 'Ready',
+    accent: '#DB2777',
+  },
+  {
+    seed: 'ren-wallet',
+    handle: '@ren@numia',
+    wallet: '6Pc...4Ae',
+    status: 'Synced',
+    accent: '#2563EB',
+  },
+]
+
+function createNavTheme(themeColors: ThemeColors): Theme {
+  return {
+    ...DefaultTheme,
+    dark: themeColors.bg !== lightColors.bg,
+    colors: {
+      ...DefaultTheme.colors,
+      background: themeColors.bg,
+      card: themeColors.card,
+      border: themeColors.border,
+      text: themeColors.text,
+      primary: themeColors.neonPurple,
+    },
+  }
 }
 
 function formatSolBalance(value: number): string {
@@ -361,12 +405,25 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <NavigationContainer theme={navTheme}>
-          <StatusBar style="dark" />
-          <RootSwitch />
-        </NavigationContainer>
+        <AppShell />
       </AppProvider>
     </SafeAreaProvider>
+  )
+}
+
+function AppShell() {
+  const { themeColors, isDarkMode } = useApp()
+  const activeStyles = useMemo(() => createAppStyles(themeColors), [themeColors])
+  const navTheme = useMemo(() => createNavTheme(themeColors), [themeColors])
+
+  colors = themeColors
+  styles = activeStyles
+
+  return (
+    <NavigationContainer theme={navTheme}>
+      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
+      <RootSwitch />
+    </NavigationContainer>
   )
 }
 
@@ -393,110 +450,189 @@ function RootSwitch() {
 }
 
 function BootSplash() {
+  const drift = useRef(new Animated.Value(0)).current
   const pulse = useRef(new Animated.Value(0)).current
-  const orbit = useRef(new Animated.Value(0)).current
+  const scan = useRef(new Animated.Value(0)).current
+  const identities = useMemo(
+    () => launchIdentityPreview.map((item) => ({ ...item, avatar: dylanAvatarSvg(item.seed, 92) })),
+    [],
+  )
 
   useEffect(() => {
+    const driftLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(drift, {
+          toValue: 1,
+          duration: 2600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(drift, {
+          toValue: 0,
+          duration: 2600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    )
+
     const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 900,
+          duration: 1100,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: 900,
+          duration: 1100,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
       ]),
     )
 
-    const orbitLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(orbit, {
-          toValue: 1,
-          duration: 760,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(orbit, {
-          toValue: 0,
-          duration: 760,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
+    const scanLoop = Animated.loop(
+      Animated.timing(scan, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
     )
 
+    driftLoop.start()
     pulseLoop.start()
-    orbitLoop.start()
+    scanLoop.start()
 
     return () => {
+      driftLoop.stop()
       pulseLoop.stop()
-      orbitLoop.stop()
+      scanLoop.stop()
     }
-  }, [orbit, pulse])
+  }, [drift, pulse, scan])
 
-  const haloScale = pulse.interpolate({
+  const routeScale = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 1.07],
+    outputRange: [0.96, 1.08],
   })
 
-  const haloOpacity = pulse.interpolate({
+  const routeOpacity = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.24, 0.5],
+    outputRange: [0.36, 0.72],
   })
 
-  const dotOneOpacity = orbit.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [1, 0.34, 0.34],
+  const scanTranslateX = scan.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-120, 120],
   })
 
-  const dotTwoOpacity = orbit.interpolate({
+  const scanOpacity = scan.interpolate({
     inputRange: [0, 0.5, 1],
-    outputRange: [0.34, 1, 0.34],
+    outputRange: [0, 1, 0],
   })
 
-  const dotThreeOpacity = orbit.interpolate({
+  const dotOneOpacity = scan.interpolate({
     inputRange: [0, 0.5, 1],
-    outputRange: [0.34, 0.34, 1],
+    outputRange: [1, 0.42, 0.42],
   })
+
+  const dotTwoOpacity = scan.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.42, 1, 0.42],
+  })
+
+  const dotThreeOpacity = scan.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.42, 0.42, 1],
+  })
+
+  const firstLift = drift.interpolate({ inputRange: [0, 1], outputRange: [-8, 7] })
+  const secondLift = drift.interpolate({ inputRange: [0, 1], outputRange: [5, -9] })
+  const thirdLift = drift.interpolate({ inputRange: [0, 1], outputRange: [-3, 10] })
+  const fourthLift = drift.interpolate({ inputRange: [0, 1], outputRange: [9, -5] })
+  const lifts = [firstLift, secondLift, thirdLift, fourthLift]
+  const identityPositions = [
+    styles.launchIdentityNorthWest,
+    styles.launchIdentityNorthEast,
+    styles.launchIdentitySouthWest,
+    styles.launchIdentitySouthEast,
+  ]
 
   return (
     <Screen style={styles.launchScreen}>
-      <View style={styles.launchCenter}>
-        <Animated.View style={[styles.launchHalo, { transform: [{ scale: haloScale }], opacity: haloOpacity }]} />
-
-        <View style={styles.launchBadge}>
-          <HugeiconsIcon icon={AiMagicIcon} color="#FFFFFF" size={30} strokeWidth={1.9} />
-        </View>
-
+      <View style={styles.launchHeader}>
         <Text style={styles.launchWordmark}>NUMIA</Text>
-        <Text style={styles.launchHeadline}>Identity-first wallet protocol</Text>
-        <Subtitle style={styles.launchSubtitle}>Readable handles. Real on-chain destinations.</Subtitle>
+      </View>
 
-        <View style={styles.launchPillRow}>
-          <View style={styles.launchPill}>
-            <Text style={styles.launchPillText}>Identity</Text>
+      <View style={styles.launchStage}>
+        <View style={styles.launchRouteLine} />
+        <View style={[styles.launchRouteLine, styles.launchRouteLineReverse]} />
+        <Animated.View
+          style={[
+            styles.launchRouteNode,
+            {
+              opacity: routeOpacity,
+              transform: [{ scale: routeScale }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.launchScanBeam,
+            {
+              opacity: scanOpacity,
+              transform: [{ translateX: scanTranslateX }],
+            },
+          ]}
+        />
+        <View style={styles.launchWalletNode}>
+          <View style={styles.launchWalletIcon}>
+            <HugeiconsIcon icon={Wallet01Icon} color="#FFFFFF" size={22} strokeWidth={1.9} />
           </View>
-          <View style={styles.launchPill}>
-            <Text style={styles.launchPillText}>Wallet</Text>
-          </View>
-          <View style={styles.launchPill}>
-            <Text style={styles.launchPillText}>Resolve</Text>
-          </View>
+          <Text style={styles.launchWalletTitle}>Route</Text>
+          <Text style={styles.launchWalletSub}>SOL ready</Text>
         </View>
+
+        {identities.map((item, index) => (
+          <Animated.View
+            key={item.handle}
+            style={[
+              styles.launchIdentityCard,
+              identityPositions[index],
+              { transform: [{ translateY: lifts[index] }] },
+            ]}
+          >
+            <View style={[styles.launchIdentityAccent, { backgroundColor: item.accent }]} />
+            <View style={styles.launchIdentityTop}>
+              <View style={[styles.launchAvatarShell, { borderColor: item.accent }]}>
+                <SvgXml xml={item.avatar} width={42} height={42} />
+              </View>
+              <View style={styles.launchIdentityCopy}>
+                <Text style={styles.launchIdentityHandle} numberOfLines={1} ellipsizeMode="tail">
+                  {item.handle}
+                </Text>
+                <Text style={styles.launchIdentityWallet} numberOfLines={1}>
+                  {item.wallet}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.launchIdentityMeta}>
+              <View style={[styles.launchIdentityDot, { backgroundColor: item.accent }]} />
+              <Text style={styles.launchIdentityStatus}>{item.status}</Text>
+            </View>
+          </Animated.View>
+        ))}
       </View>
 
       <View style={styles.launchFooter}>
-        <Text style={styles.launchFooterLabel}>Preparing secure session</Text>
+        <Text style={styles.launchHeadline}>Resolving identities</Text>
+        <Text style={styles.launchFooterLabel}>Matching handles to on-chain destinations</Text>
         <View style={styles.launchDots}>
-          <Animated.View style={[styles.launchDot, { opacity: dotOneOpacity }]} />
-          <Animated.View style={[styles.launchDot, { opacity: dotTwoOpacity }]} />
-          <Animated.View style={[styles.launchDot, { opacity: dotThreeOpacity }]} />
+          <Animated.View style={[styles.launchDot, styles.launchDotTeal, { opacity: dotOneOpacity }]} />
+          <Animated.View style={[styles.launchDot, styles.launchDotPurple, { opacity: dotTwoOpacity }]} />
+          <Animated.View style={[styles.launchDot, styles.launchDotGold, { opacity: dotThreeOpacity }]} />
         </View>
       </View>
     </Screen>
@@ -1332,7 +1468,7 @@ function MainTabs() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
+          backgroundColor: colors.card,
           borderTopColor: colors.border,
           height: 64 + bottomInset,
           paddingBottom: bottomInset + 6,
@@ -1391,11 +1527,10 @@ function MainTabs() {
 }
 
 function HomeScreen({ navigation }: { navigation: { navigate: (name: keyof MainTabsParamList) => void } }) {
-  const { session, wallet, activity, linkedWallets, refreshIdentity, refreshLinkedWallets, refreshTransferHistory, busy } = useApp()
+  const { session, wallet, activity, linkedWallets, refreshIdentity, refreshLinkedWallets, refreshTransferHistory } = useApp()
   const [balanceSol, setBalanceSol] = useState('0.00')
   const [balanceUsd, setBalanceUsd] = useState('$0.00')
   const [solUsdPrice, setSolUsdPrice] = useState<number | null>(null)
-  const [loadingBalance, setLoadingBalance] = useState(false)
   const [refreshingHome, setRefreshingHome] = useState(true)
   const [balanceError, setBalanceError] = useState('')
   const [showBalance, setShowBalance] = useState(true)
@@ -1427,7 +1562,6 @@ function HomeScreen({ navigation }: { navigation: { navigate: (name: keyof MainT
       return
     }
 
-    setLoadingBalance(true)
     setBalanceError('')
 
     const [balanceResult, priceResult] = await Promise.all([
@@ -1449,12 +1583,8 @@ function HomeScreen({ navigation }: { navigation: { navigate: (name: keyof MainT
         setBalanceUsd('$0.00')
       }
     } else {
-      setBalanceSol('0.00')
-      setBalanceUsd('$0.00')
       setBalanceError(balanceResult.error ?? 'Unable to load wallet balance.')
     }
-
-    setLoadingBalance(false)
   }, [primaryAddress])
 
   const refreshHome = useCallback(async (showLoader: boolean = false) => {
@@ -1541,33 +1671,24 @@ function HomeScreen({ navigation }: { navigation: { navigate: (name: keyof MainT
               />
             </Pressable>
             <Pressable onPress={() => void refreshHome(true)}>
-              <Text style={styles.balanceLink}>{busy || loadingBalance ? 'Refreshing...' : 'Refresh'}</Text>
+              <Text style={styles.balanceLink}>Refresh</Text>
             </Pressable>
           </View>
         </View>
         <Text style={styles.balanceValue}>
-          {refreshingHome || loadingBalance ? 'Loading...' : showBalance ? balanceUsd : '••••••'}
+          {showBalance ? balanceUsd : '••••••'}
         </Text>
-        {refreshingHome ? (
-          <View style={{ gap: 10, marginTop: 2 }}>
-            <Skeleton height={13} width="35%" radius={8} style={{ backgroundColor: 'rgba(255,255,255,0.38)' }} />
-            <Skeleton height={44} width="100%" radius={14} style={{ backgroundColor: 'rgba(255,255,255,0.24)' }} />
-          </View>
-        ) : (
-          <>
-            <Text style={styles.balanceSub}>{showBalance ? `${balanceSol} SOL` : '•••••• SOL'}</Text>
-            <View style={styles.balanceButtonsRow}>
-              <Pressable style={styles.balanceButton} onPress={() => navigation.navigate('Send')}>
-                <HugeiconsIcon icon={ArrowUpRight01Icon} color="#FFFFFF" size={18} />
-                <Text style={styles.balanceButtonText}>Send</Text>
-              </Pressable>
-              <Pressable style={styles.balanceButton} onPress={() => navigation.navigate('Receive')}>
-                <HugeiconsIcon icon={ArrowDown02Icon} color="#FFFFFF" size={18} />
-                <Text style={styles.balanceButtonText}>Receive</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
+        <Text style={styles.balanceSub}>{showBalance ? `${balanceSol} SOL` : '•••••• SOL'}</Text>
+        <View style={styles.balanceButtonsRow}>
+          <Pressable style={styles.balanceButton} onPress={() => navigation.navigate('Send')}>
+            <HugeiconsIcon icon={ArrowUpRight01Icon} color="#FFFFFF" size={18} />
+            <Text style={styles.balanceButtonText}>Send</Text>
+          </Pressable>
+          <Pressable style={styles.balanceButton} onPress={() => navigation.navigate('Receive')}>
+            <HugeiconsIcon icon={ArrowDown02Icon} color="#FFFFFF" size={18} />
+            <Text style={styles.balanceButtonText}>Receive</Text>
+          </Pressable>
+        </View>
         {balanceError ? <Text style={styles.errorTextSmall}>{balanceError}</Text> : null}
       </Card>
 
@@ -2118,6 +2239,13 @@ function SendScreen() {
   const [solUsdPrice, setSolUsdPrice] = useState<number | null>(null)
   const [loadingPrice, setLoadingPrice] = useState(false)
   const [priceError, setPriceError] = useState('')
+  const [walletBalanceSol, setWalletBalanceSol] = useState<number | null>(null)
+  const [walletBalanceLamports, setWalletBalanceLamports] = useState<bigint | null>(null)
+  const [loadingBalance, setLoadingBalance] = useState(false)
+  const [balanceError, setBalanceError] = useState('')
+  const [networkFeeLamports, setNetworkFeeLamports] = useState<bigint>(SOL_TRANSFER_FEE_FALLBACK_LAMPORTS)
+  const [loadingFee, setLoadingFee] = useState(false)
+  const [feeError, setFeeError] = useState('')
   const [resolvedAddress, setResolvedAddress] = useState('')
   const [resolvedHandle, setResolvedHandle] = useState('')
   const [resolvedDisplayName, setResolvedDisplayName] = useState('')
@@ -2139,7 +2267,10 @@ function SendScreen() {
   const [sending, setSending] = useState(false)
   const [resolving, setResolving] = useState(false)
   const resolveRequestId = useRef(0)
+  const balanceRequestId = useRef(0)
+  const feeRequestId = useRef(0)
 
+  const walletAddress = wallet?.address ?? ''
   const recipientPreviewSeed = resolvedHandle || resolvedAddress || recipient
   const resolvedAvatarSeed = useMemo(
     () => avatarSeedFromProfileAvatarUrl(resolvedAvatarUrl, recipientPreviewSeed || 'numia'),
@@ -2156,6 +2287,53 @@ function SendScreen() {
   const showBeneficiaryPrompt = Boolean(
     resolvedAddress && resolvedHandleKey && !resolving && !isSavedBeneficiary && beneficiaryPromptDismissedFor !== resolvedHandleKey,
   )
+
+  const loadWalletBalance = useCallback(async () => {
+    const requestId = balanceRequestId.current + 1
+    balanceRequestId.current = requestId
+
+    if (!walletAddress) {
+      setWalletBalanceSol(null)
+      setWalletBalanceLamports(null)
+      setBalanceError('')
+      setLoadingBalance(false)
+      return null
+    }
+
+    setLoadingBalance(true)
+    setBalanceError('')
+
+    try {
+      const result = await api.solBalance(walletAddress)
+      if (balanceRequestId.current !== requestId) return null
+
+      if (result.success && result.data) {
+        setWalletBalanceSol(result.data.sol)
+        setWalletBalanceLamports(BigInt(result.data.lamports))
+        setBalanceError('')
+        return {
+          sol: result.data.sol,
+          lamports: BigInt(result.data.lamports),
+        }
+      }
+
+      setWalletBalanceSol(null)
+      setWalletBalanceLamports(null)
+      setBalanceError(result.error ?? 'Unable to load wallet balance.')
+      return null
+    } catch {
+      if (balanceRequestId.current === requestId) {
+        setWalletBalanceSol(null)
+        setWalletBalanceLamports(null)
+        setBalanceError('Unable to load wallet balance.')
+      }
+      return null
+    } finally {
+      if (balanceRequestId.current === requestId) {
+        setLoadingBalance(false)
+      }
+    }
+  }, [walletAddress])
 
   useFocusEffect(
     useCallback(() => {
@@ -2174,6 +2352,16 @@ function SendScreen() {
         active = false
       }
     }, []),
+  )
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadWalletBalance()
+
+      return () => {
+        balanceRequestId.current += 1
+      }
+    }, [loadWalletBalance]),
   )
 
   useEffect(() => {
@@ -2283,6 +2471,31 @@ function SendScreen() {
     setError('')
   }
 
+  const handleUseMaxAmount = async () => {
+    setError('')
+
+    if (!walletAddress) {
+      setError('Create or import a wallet first.')
+      return
+    }
+
+    const balance = await loadWalletBalance()
+    if (!balance) {
+      return
+    }
+
+    const maxSendableLamports = balance.lamports > networkFeeLamports
+      ? balance.lamports - networkFeeLamports
+      : 0n
+
+    setAmountMode('SOL')
+    setAmount(formatLamportsAsSol(maxSendableLamports))
+
+    if (maxSendableLamports <= 0n) {
+      setError('Your SOL balance is too low to cover the network fee.')
+    }
+  }
+
   const parsedAmount = Number(amount.trim())
   const isNumericAmountValid = SOL_AMOUNT_REGEX.test(amount.trim()) && Number.isFinite(parsedAmount) && parsedAmount > 0
   const derivedSolAmount = useMemo(() => {
@@ -2306,6 +2519,75 @@ function SendScreen() {
   }, [amountMode, derivedSolAmount, isNumericAmountValid, parsedAmount, solUsdPrice])
 
   const isAmountReadyToSend = Boolean(derivedSolAmount && SOL_AMOUNT_REGEX.test(derivedSolAmount) && Number(derivedSolAmount) > 0)
+  const amountLamports = useMemo(() => {
+    if (!isAmountReadyToSend) return null
+
+    try {
+      return parseSolAmountToLamports(derivedSolAmount)
+    } catch {
+      return null
+    }
+  }, [derivedSolAmount, isAmountReadyToSend])
+  const requiredLamports = amountLamports !== null ? amountLamports + networkFeeLamports : null
+  const maxSendableLamports = walletBalanceLamports !== null
+    ? walletBalanceLamports > networkFeeLamports
+      ? walletBalanceLamports - networkFeeLamports
+      : 0n
+    : null
+  const hasInsufficientFunds = Boolean(
+    walletBalanceLamports !== null &&
+      requiredLamports !== null &&
+      requiredLamports > walletBalanceLamports,
+  )
+  const balanceSummary = walletBalanceLamports !== null
+    ? `${formatLamportsAsSol(walletBalanceLamports)} SOL`
+    : walletBalanceSol !== null
+      ? `${formatSolBalance(walletBalanceSol)} SOL`
+      : 'Unavailable'
+  const feeSummary = `${formatLamportsAsSol(networkFeeLamports)} SOL`
+  const requiredSummary = requiredLamports !== null ? `${formatLamportsAsSol(requiredLamports)} SOL` : ''
+  const amountSummary = amountLamports !== null ? `${formatLamportsAsSol(amountLamports)} SOL` : ''
+  const maxSendableSummary = maxSendableLamports !== null ? `${formatLamportsAsSol(maxSendableLamports)} SOL` : ''
+
+  useEffect(() => {
+    const requestId = feeRequestId.current + 1
+    feeRequestId.current = requestId
+    setFeeError('')
+
+    if (!walletAddress || !resolvedAddress || !derivedSolAmount || amountLamports === null || isSelfRecipient) {
+      setNetworkFeeLamports(SOL_TRANSFER_FEE_FALLBACK_LAMPORTS)
+      setLoadingFee(false)
+      return
+    }
+
+    setLoadingFee(true)
+    const timer = setTimeout(() => {
+      void estimateSolTransferFeeLamports({
+        fromAddress: walletAddress,
+        toAddress: resolvedAddress,
+        amount: derivedSolAmount,
+        rpcUrl: api.solanaRpcUrl,
+      })
+        .then((feeLamports) => {
+          if (feeRequestId.current !== requestId) return
+          setNetworkFeeLamports(feeLamports)
+        })
+        .catch(() => {
+          if (feeRequestId.current !== requestId) return
+          setNetworkFeeLamports(SOL_TRANSFER_FEE_FALLBACK_LAMPORTS)
+          setFeeError('Using estimated network fee.')
+        })
+        .finally(() => {
+          if (feeRequestId.current === requestId) {
+            setLoadingFee(false)
+          }
+        })
+    }, 220)
+
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [amountLamports, derivedSolAmount, isSelfRecipient, resolvedAddress, walletAddress])
 
   const useBeneficiary = (entry: Beneficiary) => {
     setRecipient(entry.handle)
@@ -2408,6 +2690,14 @@ function SendScreen() {
       setError('Create or import a wallet first.')
       return
     }
+    if (hasInsufficientFunds) {
+      setError(
+        maxSendableSummary
+          ? `Not enough SOL to cover the amount plus network fee. Try sending ${maxSendableSummary} or less.`
+          : 'Not enough SOL to cover the amount plus network fee.',
+      )
+      return
+    }
 
     setSending(true)
 
@@ -2487,6 +2777,46 @@ function SendScreen() {
       </Subtitle>
 
       <Input label="Recipient" value={recipient} onChangeText={onRecipientChange} placeholder="alex@numia or 7Uvxx..." />
+
+      {resolving ? (
+        <Card>
+          <Text style={styles.cardTitle}>Resolving recipient...</Text>
+          <View style={styles.recipientPreviewHeader}>
+            <Skeleton height={44} width={44} radius={22} />
+            <View style={{ flex: 1, gap: 8 }}>
+              <Skeleton height={16} width="52%" radius={8} />
+              <Skeleton height={12} width="68%" radius={8} />
+            </View>
+          </View>
+          <Skeleton height={12} width="100%" radius={8} />
+        </Card>
+      ) : null}
+
+      {resolvedAddress && !resolving ? (
+        <Card>
+          <Text style={styles.cardTitle}>Resolved Target</Text>
+          <View style={styles.recipientPreviewHeader}>
+            {resolvedHasRemoteAvatar && resolvedAvatarUrl ? (
+              <Image source={{ uri: resolvedAvatarUrl }} style={styles.recipientAvatarImage} />
+            ) : (
+              <SvgXml xml={recipientAvatar} width={44} height={44} />
+            )}
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.recipientPreviewTitle} numberOfLines={1} ellipsizeMode="tail">
+                {formatDisplayName(
+                  resolvedDisplayName,
+                  resolvedHandle || shortAddress(resolvedAddress, 6, 6),
+                )}
+              </Text>
+              <Text style={styles.recipientPreviewSub} numberOfLines={1} ellipsizeMode="tail">
+                {resolvedHandle || shortAddress(resolvedAddress, 6, 6)}
+              </Text>
+            </View>
+          </View>
+          {isSelfRecipient ? <Text style={styles.errorTextSmall}>You cannot send crypto to yourself.</Text> : null}
+        </Card>
+      ) : null}
+
       {beneficiaries.length > 0 ? (
         <Card>
           <Pressable
@@ -2568,50 +2898,67 @@ function SendScreen() {
         value={amount}
         onChangeText={onAmountChange}
         placeholder={amountMode === 'SOL' ? '0.25' : '15.00'}
+        keyboardType="decimal-pad"
+        rightAccessory={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Use maximum balance"
+            disabled={!walletAddress || loadingBalance}
+            onPress={() => void handleUseMaxAmount()}
+            style={({ pressed }) => [
+              styles.amountMaxButton,
+              pressed && styles.amountMaxButtonPressed,
+              (!walletAddress || loadingBalance) && styles.amountMaxButtonDisabled,
+            ]}
+          >
+            <Text style={[styles.amountMaxButtonText, (!walletAddress || loadingBalance) && styles.amountMaxButtonTextDisabled]}>
+              Max
+            </Text>
+          </Pressable>
+        }
       />
-      {loadingPrice ? <Text style={styles.infoText}>Loading SOL/USD price...</Text> : null}
+      {walletAddress && !balanceError && walletBalanceSol !== null ? (
+        <Text style={styles.infoText}>
+          Balance: {formatSolBalance(walletBalanceSol)} SOL
+        </Text>
+      ) : null}
+      {balanceError ? <Text style={styles.errorTextSmall}>{balanceError}</Text> : null}
+      {amountMode === 'USD' && loadingPrice ? <Text style={styles.infoText}>Loading SOL/USD price...</Text> : null}
       {amountPreview ? <Text style={styles.infoText}>{amountPreview}</Text> : null}
-      {!loadingPrice && priceError ? <Text style={styles.errorTextSmall}>{priceError}</Text> : null}
+      {amountMode === 'USD' && !loadingPrice && priceError ? <Text style={styles.errorTextSmall}>{priceError}</Text> : null}
+      {amountLamports !== null ? (
+        <View style={[styles.feeSummaryPanel, hasInsufficientFunds && styles.feeSummaryPanelWarning]}>
+          <View style={styles.feeSummaryRow}>
+            <Text style={styles.feeSummaryLabel}>Amount</Text>
+            <Text style={styles.feeSummaryValue}>{amountSummary}</Text>
+          </View>
+          <View style={styles.feeSummaryRow}>
+            <Text style={styles.feeSummaryLabel}>Network fee</Text>
+            <Text style={styles.feeSummaryValue}>
+              {loadingFee ? `Calculating... ${feeSummary}` : feeSummary}
+            </Text>
+          </View>
+          <View style={styles.feeSummaryRow}>
+            <Text style={styles.feeSummaryLabel}>Total needed</Text>
+            <Text style={[styles.feeSummaryValue, hasInsufficientFunds && styles.feeSummaryValueWarning]}>
+              {requiredSummary}
+            </Text>
+          </View>
+          <View style={styles.feeSummaryRow}>
+            <Text style={styles.feeSummaryLabel}>Balance</Text>
+            <Text style={[styles.feeSummaryValue, hasInsufficientFunds && styles.feeSummaryValueWarning]}>
+              {balanceSummary}
+            </Text>
+          </View>
+          {hasInsufficientFunds ? (
+            <Text style={styles.feeSummaryWarning}>
+              Insufficient funds. {maxSendableSummary ? `Try ${maxSendableSummary} or less.` : 'Reduce the amount and try again.'}
+            </Text>
+          ) : null}
+          {feeError ? <Text style={styles.feeSummaryMeta}>{feeError}</Text> : null}
+        </View>
+      ) : null}
       <Input label="Memo (optional)" value={note} onChangeText={setNote} placeholder="Dinner split" />
-
-      {resolving ? (
-        <Card>
-          <Text style={styles.cardTitle}>Resolving recipient...</Text>
-          <View style={styles.recipientPreviewHeader}>
-            <Skeleton height={44} width={44} radius={22} />
-            <View style={{ flex: 1, gap: 8 }}>
-              <Skeleton height={16} width="52%" radius={8} />
-              <Skeleton height={12} width="68%" radius={8} />
-            </View>
-          </View>
-          <Skeleton height={12} width="100%" radius={8} />
-        </Card>
-      ) : null}
-
-      {resolvedAddress && !resolving ? (
-        <Card>
-          <Text style={styles.cardTitle}>Resolved Target</Text>
-          <View style={styles.recipientPreviewHeader}>
-            {resolvedHasRemoteAvatar && resolvedAvatarUrl ? (
-              <Image source={{ uri: resolvedAvatarUrl }} style={styles.recipientAvatarImage} />
-            ) : (
-              <SvgXml xml={recipientAvatar} width={44} height={44} />
-            )}
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.recipientPreviewTitle} numberOfLines={1} ellipsizeMode="tail">
-                {formatDisplayName(
-                  resolvedDisplayName,
-                  resolvedHandle || shortAddress(resolvedAddress, 6, 6),
-                )}
-              </Text>
-              <Text style={styles.recipientPreviewSub} numberOfLines={1} ellipsizeMode="tail">
-                {resolvedHandle || shortAddress(resolvedAddress, 6, 6)}
-              </Text>
-            </View>
-          </View>
-          {isSelfRecipient ? <Text style={styles.errorTextSmall}>You cannot send crypto to yourself.</Text> : null}
-        </Card>
-      ) : null}
 
       {showBeneficiaryPrompt && !isSelfRecipient ? (
         <Card>
@@ -2630,13 +2977,18 @@ function SendScreen() {
 
       {beneficiaryFeedback ? <Text style={styles.successText}>{beneficiaryFeedback}</Text> : null}
       {recipientResolveError ? <Text style={styles.errorTextSmall}>{recipientResolveError}</Text> : null}
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <View style={styles.sendErrorPanel}>
+          <Text style={styles.sendErrorTitle}>Transfer not sent</Text>
+          <Text style={styles.sendErrorBody}>{error}</Text>
+        </View>
+      ) : null}
 
       <AppButton
         label="Send"
         onPress={() => void handleSend()}
         loading={sending || busy}
-        disabled={!recipient.trim() || !amount.trim() || !isAmountReadyToSend || isSelfRecipient}
+        disabled={!recipient.trim() || !amount.trim() || !isAmountReadyToSend || isSelfRecipient || hasInsufficientFunds}
       />
     </Screen>
     <Modal
@@ -2787,7 +3139,17 @@ function ReceiveScreen() {
 }
 
 function ProfileScreen() {
-  const { session, wallet, linkedWallets, logout, clearLocalWallet, updateProfile, busy } = useApp()
+  const {
+    session,
+    wallet,
+    linkedWallets,
+    logout,
+    clearLocalWallet,
+    updateProfile,
+    busy,
+    isDarkMode,
+    setThemeMode,
+  } = useApp()
   const [bio, setBio] = useState(session?.identity.profile?.bio ?? '')
   const [twitterHandle, setTwitterHandle] = useState(session?.identity.profile?.twitterHandle ?? '')
   const [websiteUrl, setWebsiteUrl] = useState(session?.identity.profile?.websiteUrl ?? '')
@@ -3116,6 +3478,27 @@ function ProfileScreen() {
       ) : (
         <>
           <Card>
+            <View style={styles.settingToggleRow}>
+              <View style={styles.settingIconBubble}>
+                <HugeiconsIcon icon={Moon02Icon} color={colors.neonPurple} size={20} strokeWidth={1.9} />
+              </View>
+              <View style={styles.settingTextBlock}>
+                <Text style={styles.settingTitle}>Dark Mode</Text>
+                <Text style={styles.settingDescription}>
+                  Switch NUMIA into a deeper, lower-glare interface.
+                </Text>
+              </View>
+              <Switch
+                value={isDarkMode}
+                onValueChange={(enabled) => void setThemeMode(enabled ? 'dark' : 'light')}
+                trackColor={{ false: colors.border, true: '#5B41D8' }}
+                thumbColor={isDarkMode ? '#F7F2FF' : '#FFFFFF'}
+                ios_backgroundColor={colors.border}
+              />
+            </View>
+          </Card>
+
+          <Card>
             <View style={styles.rowBetween}>
               <Text style={styles.cardTitle}>Recovery & Private Key</Text>
               <Pressable onPress={() => setShowSecrets((current) => !current)} style={styles.secretEyeButton}>
@@ -3242,12 +3625,25 @@ function ProfileDetailRow({
   )
 }
 
-const styles = StyleSheet.create({
+let styles = createAppStyles(colors)
+
+function createAppStyles(colors: ThemeColors) {
+  const isDark = colors.bg !== lightColors.bg
+  const surface = colors.card
+  const softSurface = colors.cardAlt
+  const accentSoft = isDark ? '#2B2148' : '#EEE6FF'
+  const accentBorder = isDark ? '#4A3A72' : '#DCCFFF'
+  const successSoft = isDark ? 'rgba(79, 214, 159, 0.16)' : '#EBFFF4'
+  const warningSoft = isDark ? 'rgba(244, 184, 97, 0.16)' : '#FFF7EE'
+  const dangerSoft = isDark ? 'rgba(255, 107, 155, 0.14)' : '#FFF0F6'
+  const dangerPanel = isDark ? 'rgba(255, 107, 155, 0.12)' : '#FFF0F2'
+
+  return StyleSheet.create({
   loadingScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.bg,
   },
   centered: {
     justifyContent: 'center',
@@ -3255,96 +3651,228 @@ const styles = StyleSheet.create({
   },
   launchScreen: {
     justifyContent: 'space-between',
-    paddingTop: spacing.xxl,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
   },
-  launchCenter: {
+  launchHeader: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
-    paddingTop: spacing.xxl,
-  },
-  launchHalo: {
-    position: 'absolute',
-    width: 168,
-    height: 168,
-    borderRadius: 168,
-    borderWidth: 1,
-    borderColor: '#CAB9FF',
-    backgroundColor: '#EDE4FF',
-  },
-  launchBadge: {
-    width: 84,
-    height: 84,
-    borderRadius: 84,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#6B3BFF',
-    borderWidth: 1,
-    borderColor: '#5D34DF',
-    shadowColor: '#6B3BFF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.24,
-    shadowRadius: 12,
-    elevation: 4,
   },
   launchWordmark: {
-    marginTop: spacing.md,
     color: colors.text,
     fontFamily: fonts.regular,
-    fontSize: 24,
-    letterSpacing: 3.2,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: 2.6,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  launchStage: {
+    width: '100%',
+    height: 430,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  launchRouteLine: {
+    position: 'absolute',
+    width: 260,
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    transform: [{ rotate: '27deg' }],
+  },
+  launchRouteLineReverse: {
+    transform: [{ rotate: '-29deg' }],
+  },
+  launchScanBeam: {
+    position: 'absolute',
+    top: '50%',
+    width: 74,
+    height: 3,
+    marginTop: -1,
+    borderRadius: 3,
+    backgroundColor: colors.neonPurple,
+  },
+  launchRouteNode: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: 110,
+    backgroundColor: softSurface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  launchWalletNode: {
+    width: 102,
+    minHeight: 108,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: surface,
+    padding: spacing.sm,
+    shadowColor: '#25184D',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.11,
+    shadowRadius: 20,
+    elevation: 4,
+  },
+  launchWalletIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.text,
+    marginBottom: spacing.sm,
+  },
+  launchWalletTitle: {
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  launchWalletSub: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '700',
+  },
+  launchIdentityCard: {
+    position: 'absolute',
+    width: 132,
+    minHeight: 92,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: surface,
+    padding: 8,
+    opacity: 0.94,
+    shadowColor: '#24144E',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  launchIdentityNorthWest: {
+    left: 0,
+    top: 12,
+  },
+  launchIdentityNorthEast: {
+    right: 0,
+    top: 86,
+  },
+  launchIdentitySouthWest: {
+    left: 4,
+    top: 256,
+  },
+  launchIdentitySouthEast: {
+    right: 2,
+    top: 318,
+  },
+  launchIdentityAccent: {
+    position: 'absolute',
+    left: 0,
+    top: 12,
+    bottom: 12,
+    width: 4,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
+  },
+  launchIdentityTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  launchAvatarShell: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: surface,
+    borderWidth: 1,
+  },
+  launchIdentityCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  launchIdentityHandle: {
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+  },
+  launchIdentityWallet: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
+  launchIdentityMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 7,
+    paddingTop: 7,
+    borderTopWidth: 1,
+    borderTopColor: '#F0EAFB',
+  },
+  launchIdentityDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 7,
+  },
+  launchIdentityStatus: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  launchFooter: {
+    alignItems: 'center',
+    gap: 6,
   },
   launchHeadline: {
     color: colors.text,
     fontFamily: fonts.regular,
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 22,
+    lineHeight: 28,
     textAlign: 'center',
-    fontWeight: '700',
-  },
-  launchSubtitle: {
-    textAlign: 'center',
-    maxWidth: 260,
-  },
-  launchPillRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  launchPill: {
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: '#DCCFFF',
-    backgroundColor: '#F8F3FF',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  launchPillText: {
-    color: colors.textMuted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-  },
-  launchFooter: {
-    alignItems: 'center',
-    gap: spacing.sm,
+    fontWeight: '800',
   },
   launchFooterLabel: {
     color: colors.textDim,
     fontFamily: fonts.regular,
-    fontSize: 12,
-    letterSpacing: 0.3,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    fontWeight: '700',
   },
   launchDots: {
     flexDirection: 'row',
     gap: 8,
+    marginTop: 4,
   },
   launchDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 8,
+    width: 9,
+    height: 9,
+    borderRadius: 9,
+  },
+  launchDotTeal: {
+    backgroundColor: '#0EA5A4',
+  },
+  launchDotPurple: {
     backgroundColor: colors.neonPurple,
+  },
+  launchDotGold: {
+    backgroundColor: '#F59E0B',
   },
   brandMark: {
     width: 74,
@@ -3352,9 +3880,9 @@ const styles = StyleSheet.create({
     borderRadius: 74,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EEE5FF',
+    backgroundColor: softSurface,
     borderWidth: 1,
-    borderColor: '#DCCFFF',
+    borderColor: colors.border,
   },
   brandMarkSmall: {
     width: 58,
@@ -3362,9 +3890,9 @@ const styles = StyleSheet.create({
     borderRadius: 58,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1EBFF',
+    backgroundColor: softSurface,
     borderWidth: 1,
-    borderColor: '#DDCFFF',
+    borderColor: colors.border,
   },
   tag: {
     color: colors.cyan,
@@ -3416,9 +3944,9 @@ const styles = StyleSheet.create({
     width: 214,
     height: 214,
     borderRadius: 214,
-    backgroundColor: '#DED2FF',
+    backgroundColor: accentSoft,
     borderWidth: 1,
-    borderColor: '#C8B7FF',
+    borderColor: accentBorder,
   },
   onboardingIdentityPreview: {
     position: 'absolute',
@@ -3444,9 +3972,9 @@ const styles = StyleSheet.create({
     borderRadius: 96,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderWidth: 1,
-    borderColor: '#D8CBFF',
+    borderColor: colors.border,
     shadowColor: '#6B3BFF',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.14,
@@ -3459,8 +3987,8 @@ const styles = StyleSheet.create({
     maxWidth: 136,
     borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#DCCFFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: surface,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -3507,9 +4035,9 @@ const styles = StyleSheet.create({
     width: 218,
     height: 218,
     borderRadius: 218,
-    backgroundColor: '#DED2FF',
+    backgroundColor: accentSoft,
     borderWidth: 1,
-    borderColor: '#C8B7FF',
+    borderColor: accentBorder,
   },
   walletEntryIdentityCard: {
     position: 'absolute',
@@ -3524,9 +4052,9 @@ const styles = StyleSheet.create({
     borderRadius: 92,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderWidth: 1,
-    borderColor: '#D8CBFF',
+    borderColor: colors.border,
     shadowColor: '#6B3BFF',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.14,
@@ -3538,8 +4066,8 @@ const styles = StyleSheet.create({
     width: 136,
     borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#DCCFFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: accentBorder,
+    backgroundColor: surface,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -3566,9 +4094,9 @@ const styles = StyleSheet.create({
     borderRadius: 104,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderWidth: 1,
-    borderColor: '#D8CBFF',
+    borderColor: colors.border,
     shadowColor: '#6B3BFF',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.14,
@@ -3628,9 +4156,9 @@ const styles = StyleSheet.create({
     width: 208,
     height: 208,
     borderRadius: 208,
-    backgroundColor: '#DED2FF',
+    backgroundColor: accentSoft,
     borderWidth: 1,
-    borderColor: '#C8B7FF',
+    borderColor: accentBorder,
     opacity: 0.38,
   },
   authFoundAvatarShell: {
@@ -3639,9 +4167,9 @@ const styles = StyleSheet.create({
     borderRadius: 112,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderWidth: 1,
-    borderColor: '#D8CBFF',
+    borderColor: colors.border,
     shadowColor: '#6B3BFF',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.14,
@@ -3673,8 +4201,8 @@ const styles = StyleSheet.create({
     maxWidth: 220,
     borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: '#DCCFFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: accentBorder,
+    backgroundColor: surface,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
@@ -3699,12 +4227,12 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   walletFlowCard: {
-    backgroundColor: '#FCFAFF',
-    borderColor: '#DED3FB',
+    backgroundColor: softSurface,
+    borderColor: colors.border,
   },
   walletFlowLoaderCard: {
-    backgroundColor: '#FCFAFF',
-    borderColor: '#DED3FB',
+    backgroundColor: softSurface,
+    borderColor: colors.border,
     alignItems: 'center',
     paddingVertical: spacing.xl,
     gap: spacing.sm,
@@ -3725,7 +4253,7 @@ const styles = StyleSheet.create({
   },
   inlineToast: {
     borderWidth: 1,
-    borderColor: '#E7D4FF',
+    borderColor: accentBorder,
     backgroundColor: '#3A1C8D',
     borderRadius: radius.md,
     paddingHorizontal: 12,
@@ -3796,8 +4324,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   methodTabActive: {
-    borderColor: '#CDBAFF',
-    backgroundColor: '#EEE6FF',
+    borderColor: colors.neonPurple,
+    backgroundColor: accentSoft,
   },
   methodText: {
     color: colors.textMuted,
@@ -3816,7 +4344,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
@@ -3860,14 +4388,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   balanceCard: {
     borderRadius: radius.xl,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: '#5F34EA',
-    backgroundColor: '#6B3BFF',
+    borderColor: colors.neonPurple,
+    backgroundColor: colors.neonPurple,
     gap: spacing.md,
   },
   balanceLabel: {
@@ -3935,13 +4463,45 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
   },
+  settingToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  settingIconBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.cardAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  settingTextBlock: {
+    flex: 1,
+    gap: 3,
+  },
+  settingTitle: {
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  settingDescription: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   secretEyeButton: {
     width: 30,
     height: 30,
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3973,7 +4533,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   secretCopyText: {
     color: colors.neonPurple,
@@ -4033,7 +4593,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   recipientPreviewTitle: {
     color: colors.text,
@@ -4077,7 +4637,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   beneficiaryAvatarImage: {
     width: 28,
@@ -4085,7 +4645,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   beneficiaryName: {
     color: colors.text,
@@ -4112,7 +4672,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   beneficiaryPromptButtonText: {
     color: colors.textMuted,
@@ -4122,12 +4682,12 @@ const styles = StyleSheet.create({
   beneficiaryPromptButtonPrimary: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#5F34EA',
+    borderColor: colors.neonPurple,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,
-    backgroundColor: '#6B3BFF',
+    backgroundColor: colors.neonPurple,
   },
   beneficiaryPromptButtonPrimaryText: {
     color: '#FFFFFF',
@@ -4143,14 +4703,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 9,
   },
   amountModeButtonActive: {
-    borderColor: '#5F34EA',
-    backgroundColor: '#EEE6FF',
+    borderColor: colors.neonPurple,
+    backgroundColor: accentSoft,
   },
   amountModeButtonText: {
     color: colors.textMuted,
@@ -4159,6 +4719,105 @@ const styles = StyleSheet.create({
   },
   amountModeButtonTextActive: {
     color: colors.neonPurple,
+  },
+  amountMaxButton: {
+    borderWidth: 1,
+    borderColor: accentBorder,
+    borderRadius: radius.sm,
+    backgroundColor: softSurface,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    minWidth: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  amountMaxButtonPressed: {
+    opacity: 0.85,
+  },
+  amountMaxButtonDisabled: {
+    opacity: 0.55,
+  },
+  amountMaxButtonText: {
+    color: colors.neonPurple,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  amountMaxButtonTextDisabled: {
+    color: colors.textDim,
+  },
+  feeSummaryPanel: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 7,
+  },
+  feeSummaryPanelWarning: {
+    borderColor: colors.danger,
+    borderWidth: 1.5,
+    backgroundColor: dangerPanel,
+  },
+  feeSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  feeSummaryLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  feeSummaryValue: {
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  feeSummaryValueWarning: {
+    color: colors.danger,
+    fontWeight: '700',
+  },
+  feeSummaryWarning: {
+    color: colors.danger,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  feeSummaryMeta: {
+    color: colors.textDim,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  sendErrorPanel: {
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: radius.md,
+    backgroundColor: dangerSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 3,
+  },
+  sendErrorTitle: {
+    color: colors.danger,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  sendErrorBody: {
+    color: colors.danger,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   infoText: {
     color: colors.textMuted,
@@ -4182,14 +4841,14 @@ const styles = StyleSheet.create({
   txFilterChip: {
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderRadius: radius.full,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   txFilterChipActive: {
-    borderColor: '#5F34EA',
-    backgroundColor: '#EEE6FF',
+    borderColor: colors.neonPurple,
+    backgroundColor: accentSoft,
   },
   txFilterChipText: {
     color: colors.textMuted,
@@ -4234,7 +4893,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   txRowTitle: {
     color: colors.text,
@@ -4286,7 +4945,7 @@ const styles = StyleSheet.create({
   },
   txDetailCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -4304,19 +4963,19 @@ const styles = StyleSheet.create({
   },
   txDetailStatusPill: {
     borderWidth: 1,
-    borderColor: '#CBECDD',
+    borderColor: colors.success,
     borderRadius: radius.full,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    backgroundColor: '#EBFFF4',
+    backgroundColor: successSoft,
   },
   txDetailStatusPillWarning: {
-    borderColor: '#F4DFC6',
-    backgroundColor: '#FFF7EE',
+    borderColor: colors.warning,
+    backgroundColor: warningSoft,
   },
   txDetailStatusPillDanger: {
-    borderColor: '#F2CAD5',
-    backgroundColor: '#FFF0F6',
+    borderColor: colors.danger,
+    backgroundColor: dangerSoft,
   },
   txDetailStatusText: {
     color: colors.success,
@@ -4343,7 +5002,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   txDetailRecipientName: {
     color: colors.text,
@@ -4361,7 +5020,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    backgroundColor: '#FBF9FF',
+    backgroundColor: softSurface,
     padding: spacing.md,
     gap: 8,
   },
@@ -4394,12 +5053,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 96,
     borderWidth: 1,
-    borderColor: '#D7C8FF',
+    borderColor: accentBorder,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,
-    backgroundColor: '#F4EEFF',
+    backgroundColor: accentSoft,
   },
   txDetailProfileText: {
     color: colors.neonPurple,
@@ -4417,7 +5076,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingVertical: 11,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   txDetailCopyText: {
     color: colors.neonPurple,
@@ -4428,12 +5087,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 96,
     borderWidth: 1,
-    borderColor: '#5F34EA',
+    borderColor: colors.neonPurple,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,
-    backgroundColor: '#6B3BFF',
+    backgroundColor: colors.neonPurple,
   },
   txDetailDoneText: {
     color: '#FFFFFF',
@@ -4449,7 +5108,7 @@ const styles = StyleSheet.create({
   },
   identityProfileCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -4465,11 +5124,11 @@ const styles = StyleSheet.create({
   },
   identityProfileCloseButton: {
     borderWidth: 1,
-    borderColor: '#D7C8FF',
+    borderColor: accentBorder,
     borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 7,
-    backgroundColor: '#F4EEFF',
+    backgroundColor: accentSoft,
   },
   identityProfileCloseText: {
     color: colors.neonPurple,
@@ -4493,7 +5152,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   identityProfileName: {
     color: colors.text,
@@ -4518,7 +5177,7 @@ const styles = StyleSheet.create({
   },
   txModalCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -4542,15 +5201,15 @@ const styles = StyleSheet.create({
   },
   txModalStatusPill: {
     borderWidth: 1,
-    borderColor: '#CBECDD',
+    borderColor: colors.success,
     borderRadius: radius.full,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    backgroundColor: '#EBFFF4',
+    backgroundColor: successSoft,
   },
   txModalStatusPillWarning: {
-    borderColor: '#F4DFC6',
-    backgroundColor: '#FFF7EE',
+    borderColor: colors.warning,
+    backgroundColor: warningSoft,
   },
   txModalStatusText: {
     color: colors.success,
@@ -4564,7 +5223,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    backgroundColor: '#FBF9FF',
+    backgroundColor: softSurface,
     padding: spacing.md,
     gap: 6,
   },
@@ -4592,7 +5251,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   txModalReference: {
     color: colors.text,
@@ -4621,7 +5280,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingVertical: 11,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   txModalCopyText: {
     color: colors.neonPurple,
@@ -4631,12 +5290,12 @@ const styles = StyleSheet.create({
   txModalDoneButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#5F34EA',
+    borderColor: colors.neonPurple,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 11,
-    backgroundColor: '#6B3BFF',
+    backgroundColor: colors.neonPurple,
   },
   txModalDoneText: {
     color: '#FFFFFF',
@@ -4646,7 +5305,7 @@ const styles = StyleSheet.create({
   qrWrap: {
     padding: 14,
     borderRadius: radius.lg,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     marginTop: spacing.md,
   },
   copyRow: {
@@ -4670,8 +5329,8 @@ const styles = StyleSheet.create({
   },
   inlineActionButton: {
     borderWidth: 1,
-    borderColor: '#D7C8FF',
-    backgroundColor: '#F4EEFF',
+    borderColor: accentBorder,
+    backgroundColor: accentSoft,
     borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -4695,12 +5354,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
   },
   profileLogoutButton: {
     borderWidth: 1,
-    borderColor: '#E7DFFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: surface,
     borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -4738,13 +5397,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarOptionSelected: {
     borderColor: colors.neonPurple,
-    backgroundColor: '#EEE6FF',
+    backgroundColor: accentSoft,
   },
   avatarOptionPressed: {
     opacity: 0.85,
@@ -4758,13 +5417,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     paddingVertical: 10,
     alignItems: 'center',
   },
   sectionTabActive: {
-    borderColor: '#CDBAFF',
-    backgroundColor: '#EEE6FF',
+    borderColor: colors.neonPurple,
+    backgroundColor: accentSoft,
   },
   sectionTabText: {
     color: colors.textMuted,
@@ -4790,8 +5449,8 @@ const styles = StyleSheet.create({
   },
   profileShowcaseCard: {
     borderWidth: 1,
-    borderColor: '#DCCFFF',
-    backgroundColor: '#F6F1FF',
+    borderColor: accentBorder,
+    backgroundColor: softSurface,
     borderRadius: radius.md,
     padding: spacing.md,
     gap: 6,
@@ -4813,7 +5472,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: surface,
     overflow: 'hidden',
   },
   profileDetailRow: {
@@ -4851,4 +5510,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.5,
   },
-})
+  })
+}

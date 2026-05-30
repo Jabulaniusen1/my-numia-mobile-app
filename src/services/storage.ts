@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as SecureStore from 'expo-secure-store'
 import type { Beneficiary, LocalWallet, Session, TransferRecord } from '../types/app'
+import type { ThemeMode } from '../theme/tokens'
 
 const KEYS = {
   onboarding: 'numia_onboarding_seen_v1',
@@ -10,6 +11,7 @@ const KEYS = {
   session: 'numia_session_v1',
   activity: 'numia_activity_v1',
   beneficiaries: 'numia_beneficiaries_v1',
+  themeMode: 'numia_theme_mode_v1',
 }
 
 type StoredWalletMeta = Omit<LocalWallet, 'secretKeyBase58' | 'mnemonic'>
@@ -108,4 +110,13 @@ export async function loadBeneficiaries(): Promise<Beneficiary[]> {
   if (!raw) return []
 
   return JSON.parse(raw) as Beneficiary[]
+}
+
+export async function saveThemeMode(mode: ThemeMode): Promise<void> {
+  await AsyncStorage.setItem(KEYS.themeMode, mode)
+}
+
+export async function loadThemeMode(): Promise<ThemeMode> {
+  const raw = await AsyncStorage.getItem(KEYS.themeMode)
+  return raw === 'dark' ? 'dark' : 'light'
 }
