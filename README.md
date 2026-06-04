@@ -9,7 +9,7 @@ React Native + Expo mobile app for the NUMIA identity-first wallet experience.
 - Claim NUMIA identity (`username@numia`)
 - Wallet sign-in with backend challenge/response
 - Dashboard + identity card
-- Send flow with identity resolution (`alex@numia` -> wallet address)
+- Send flow with backend quote, identity resolution (`alex@numia` -> wallet address), on-chain SOL broadcast, transfer history sync, and service-fee settlement when configured
 - Receive flow with QR + copy
 - Profile + basic editable profile fields
 
@@ -32,6 +32,7 @@ Example value:
 
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://localhost:3001
+EXPO_PUBLIC_API_TIMEOUT_MS=12000
 ```
 
 For physical devices, use your machine LAN IP instead of `localhost`.
@@ -48,6 +49,6 @@ Then open on iOS/Android via Expo Go.
 ## Notes
 
 - This MVP focuses on identity + UX flow validation.
-- Send flow writes transfer intents to backend (`/api/transactions/send-intent`) and loads activity from backend history (`/api/transactions/history`).
-- On-chain transaction broadcast is not implemented yet; intents are currently stored as simulated transfers.
+- Send flow quotes the backend (`/api/transactions/quote`), broadcasts SOL on-chain, records the transfer with `/api/transactions/send`, and loads activity from backend history (`/api/transactions/history`).
+- If NUMIA service fees are enabled by backend config, the app sends the service-fee payment and verifies it through `/api/transactions/:id/service-fee/payment`.
 - Local wallet custody is for MVP/prototyping only.

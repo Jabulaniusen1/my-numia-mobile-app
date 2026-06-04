@@ -43,6 +43,7 @@
     "start": "expo start",
     "start:go": "node scripts/start-expo-go-lan.js",
     "start:tunnel": "expo start --go --tunnel",
+    "typecheck": "tsc --noEmit",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

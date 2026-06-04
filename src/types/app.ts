@@ -69,12 +69,59 @@ export interface TransferRecord {
   recipientAvatarUrl?: string | null
   amount: string
   note?: string | null
+  routedViaIdentity?: boolean
+  serviceFeeEnabled?: boolean
+  serviceFeeAmount?: string
+  serviceFeeCurrency?: string | null
+  serviceFeeType?: string | null
+  serviceFeeBps?: number | null
+  serviceFeeFlatAmount?: string | null
+  serviceFeeTreasuryAddress?: string | null
+  serviceFeePaymentRecordId?: string | null
+  serviceFeeStatus?: string | null
+  totalDebitAmount?: string | null
   createdAt: string
   status: string
   txSignature: string
   direction: 'SENT' | 'RECEIVED'
   counterpartyHandle?: string | null
   counterpartyAvatarUrl?: string | null
+}
+
+export interface ServiceFeeQuote {
+  applies: boolean
+  enabled: boolean
+  namespace: string | null
+  chain: string
+  amount: string
+  serviceFeeAmount: string
+  totalDebitAmount: string
+  feeCurrency: string
+  feeType?: string
+  serviceFeeConfigId?: string
+  percentageBps?: number
+  flatFeeAmount?: string
+  minimumFeeAmount?: string | null
+  maximumFeeAmount?: string | null
+  treasuryAddress?: string | null
+  reason?: string
+}
+
+export interface TransferQuote {
+  chain: string
+  fromAddress: string
+  toAddress: string
+  recipientInput: string
+  recipientHandle?: string | null
+  amount: string
+  note?: string | null
+  routedViaIdentity: boolean
+  serviceFee: ServiceFeeQuote
+}
+
+export interface ServiceFeeSettlement {
+  payment?: unknown
+  transfer?: TransferRecord
 }
 
 export interface Beneficiary {

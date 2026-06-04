@@ -15,7 +15,7 @@ import {
   saveThemeMode,
   saveWallet,
 } from '../services/storage'
-import type { Identity, LocalWallet, Session, TransferRecord, WalletAccount } from '../types/app'
+import type { Identity, LocalWallet, Session, TransferQuote, TransferRecord, WalletAccount } from '../types/app'
 import { darkColors, lightColors, type ThemeColors, type ThemeMode } from '../theme/tokens'
 import {
   createWallet,
@@ -66,6 +66,12 @@ interface AppContextValue {
   updateProfile: (updates: ProfileUpdates) => Promise<Identity>
   updateCustomHandle: (customHandle: string) => Promise<Identity>
   resolveRecipient: (raw: string) => Promise<ResolveResult>
+  quoteTransfer: (payload: {
+    recipient: string
+    amount: string
+    note?: string
+    chain?: string
+  }) => Promise<TransferQuote>
   sendTransferIntent: (payload: {
     recipient: string
     amount: string
@@ -74,6 +80,7 @@ interface AppContextValue {
     txSignature?: string
     status?: string
   }) => Promise<TransferRecord>
+  settleServiceFeePayment: (transferIntentId: string, txSignature: string, chain?: string) => Promise<TransferRecord | null>
   logout: () => Promise<void>
 }
 
@@ -590,6 +597,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return transfer
   }, [activity, session])
 
+  const quoteTransfer = useCallback(async (payload: {
+    recipient: string
+    amount: string
+    note?: string
+    chain?: string
+  }) => {
+    if (!session?.token) {
+      throw new Error('You need to be signed in to quote a transfer.')
+    }
+
+    const response = await api.quoteTransfer(session.token, payload)
+    if (!response.success || !response.data) {
+      throw new Error(response.error ?? 'Transfer quote failed.')
+    }
+
+    return response.data
+  }, [session])
+
+  const settleServiceFeePayment = useCallback(async (
+    transferIntentId: string,
+    txSignature: string,
+    chain = 'SOL',
+  ) => {
+    if (!session?.token) {
+      throw new Error('You need to be signed in to settle a service fee.')
+    }
+
+    const response = await api.settleServiceFeePayment(session.token, transferIntentId, txSignature, chain)
+    if (!response.success || !response.data) {
+      throw new Error(response.error ?? 'Service fee verification failed.')
+    }
+
+    const transfer = response.data.transfer ?? null
+    if (transfer) {
+      const next = [transfer, ...activity.filter((item) => item.id !== transfer.id)].slice(0, 50)
+      setActivity(next)
+      await saveActivity(next)
+    }
+
+    return transfer
+  }, [activity, session])
+
   const logout = useCallback(async () => {
     await clearSessionAndActivity()
     setSessionState(null)
@@ -625,7 +674,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile,
     updateCustomHandle,
     resolveRecipient,
+    quoteTransfer,
     sendTransferIntent,
+    settleServiceFeePayment,
     logout,
   }), [
     activity,
@@ -644,9 +695,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshIdentity,
     refreshLinkedWallets,
     refreshTransferHistory,
+    quoteTransfer,
     resolveRecipient,
     session,
     sendTransferIntent,
+    settleServiceFeePayment,
     setThemeMode,
     signInWithWallet,
     themeColors,

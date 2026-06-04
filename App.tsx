@@ -50,7 +50,7 @@ import {
 import { colors as lightColors, fonts, radius, spacing, type ThemeColors } from './src/theme/tokens'
 import { api } from './src/services/api'
 import { loadBeneficiaries, saveBeneficiaries } from './src/services/storage'
-import type { Beneficiary, Identity, LocalWallet, TransferRecord } from './src/types/app'
+import type { Beneficiary, Identity, LocalWallet, TransferQuote, TransferRecord } from './src/types/app'
 import {
   avatarSeedFromProfileAvatarUrl,
   avatarUrlFromSeed,
@@ -152,6 +152,28 @@ function formatUsd(value: number): string {
 function formatSolForInput(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return value.toFixed(9).replace(/\.?0+$/, '')
+}
+
+function parseOptionalSolLamports(value: string | null | undefined): bigint {
+  const amount = value?.trim()
+  if (!amount) return 0n
+
+  try {
+    return parseSolAmountToLamports(amount)
+  } catch {
+    return 0n
+  }
+}
+
+function serviceFeeNeedsSettlement(quote: TransferQuote | null): boolean {
+  if (!quote?.serviceFee.enabled) return false
+  return parseOptionalSolLamports(quote.serviceFee.serviceFeeAmount) > 0n
+}
+
+function serviceFeeCurrencySupported(quote: TransferQuote | null): boolean {
+  if (!quote?.serviceFee.enabled) return true
+  const currency = quote?.serviceFee.feeCurrency?.trim().toUpperCase()
+  return !currency || currency === 'SOL' || currency === 'NATIVE'
 }
 
 function toCapitalizedName(value: string): string {
@@ -2229,7 +2251,7 @@ function TransactionsScreen({ navigation }: { navigation: { navigate: (name: key
 }
 
 function SendScreen() {
-  const { wallet, resolveRecipient, sendTransferIntent, busy } = useApp()
+  const { wallet, resolveRecipient, quoteTransfer, sendTransferIntent, settleServiceFeePayment, busy } = useApp()
   const [amountMode, setAmountMode] = useState<'SOL' | 'USD'>('SOL')
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
@@ -2246,6 +2268,9 @@ function SendScreen() {
   const [networkFeeLamports, setNetworkFeeLamports] = useState<bigint>(SOL_TRANSFER_FEE_FALLBACK_LAMPORTS)
   const [loadingFee, setLoadingFee] = useState(false)
   const [feeError, setFeeError] = useState('')
+  const [backendQuote, setBackendQuote] = useState<TransferQuote | null>(null)
+  const [loadingBackendQuote, setLoadingBackendQuote] = useState(false)
+  const [backendQuoteError, setBackendQuoteError] = useState('')
   const [resolvedAddress, setResolvedAddress] = useState('')
   const [resolvedHandle, setResolvedHandle] = useState('')
   const [resolvedDisplayName, setResolvedDisplayName] = useState('')
@@ -2269,6 +2294,7 @@ function SendScreen() {
   const resolveRequestId = useRef(0)
   const balanceRequestId = useRef(0)
   const feeRequestId = useRef(0)
+  const quoteRequestId = useRef(0)
 
   const walletAddress = wallet?.address ?? ''
   const recipientPreviewSeed = resolvedHandle || resolvedAddress || recipient
@@ -2484,15 +2510,16 @@ function SendScreen() {
       return
     }
 
-    const maxSendableLamports = balance.lamports > networkFeeLamports
-      ? balance.lamports - networkFeeLamports
+    const feeOverheadLamports = networkFeeLamports + serviceFeeLamports + serviceFeeNetworkFeeLamports
+    const maxSendableLamports = balance.lamports > feeOverheadLamports
+      ? balance.lamports - feeOverheadLamports
       : 0n
 
     setAmountMode('SOL')
     setAmount(formatLamportsAsSol(maxSendableLamports))
 
     if (maxSendableLamports <= 0n) {
-      setError('Your SOL balance is too low to cover the network fee.')
+      setError('Your SOL balance is too low to cover the send fees.')
     }
   }
 
@@ -2528,10 +2555,18 @@ function SendScreen() {
       return null
     }
   }, [derivedSolAmount, isAmountReadyToSend])
-  const requiredLamports = amountLamports !== null ? amountLamports + networkFeeLamports : null
+  const serviceFeeLamports = useMemo(() => (
+    serviceFeeNeedsSettlement(backendQuote)
+      ? parseOptionalSolLamports(backendQuote?.serviceFee.serviceFeeAmount)
+      : 0n
+  ), [backendQuote])
+  const serviceFeeNetworkFeeLamports = serviceFeeLamports > 0n ? networkFeeLamports : 0n
+  const requiredLamports = amountLamports !== null
+    ? amountLamports + networkFeeLamports + serviceFeeLamports + serviceFeeNetworkFeeLamports
+    : null
   const maxSendableLamports = walletBalanceLamports !== null
-    ? walletBalanceLamports > networkFeeLamports
-      ? walletBalanceLamports - networkFeeLamports
+    ? walletBalanceLamports > networkFeeLamports + serviceFeeLamports + serviceFeeNetworkFeeLamports
+      ? walletBalanceLamports - networkFeeLamports - serviceFeeLamports - serviceFeeNetworkFeeLamports
       : 0n
     : null
   const hasInsufficientFunds = Boolean(
@@ -2545,9 +2580,18 @@ function SendScreen() {
       ? `${formatSolBalance(walletBalanceSol)} SOL`
       : 'Unavailable'
   const feeSummary = `${formatLamportsAsSol(networkFeeLamports)} SOL`
+  const serviceFeeSummary = `${formatLamportsAsSol(serviceFeeLamports)} SOL`
+  const serviceFeeNetworkSummary = `${formatLamportsAsSol(serviceFeeNetworkFeeLamports)} SOL`
   const requiredSummary = requiredLamports !== null ? `${formatLamportsAsSol(requiredLamports)} SOL` : ''
   const amountSummary = amountLamports !== null ? `${formatLamportsAsSol(amountLamports)} SOL` : ''
   const maxSendableSummary = maxSendableLamports !== null ? `${formatLamportsAsSol(maxSendableLamports)} SOL` : ''
+  const hasUnsupportedServiceFeeCurrency = !serviceFeeCurrencySupported(backendQuote)
+  const quoteBlocksSend = loadingBackendQuote || Boolean(backendQuoteError) || hasUnsupportedServiceFeeCurrency
+  const quoteSummary = backendQuote
+    ? serviceFeeLamports > 0n
+      ? 'NUMIA service fee quote applied.'
+      : 'No NUMIA service fee for this send.'
+    : ''
 
   useEffect(() => {
     const requestId = feeRequestId.current + 1
@@ -2588,6 +2632,49 @@ function SendScreen() {
       clearTimeout(timer)
     }
   }, [amountLamports, derivedSolAmount, isSelfRecipient, resolvedAddress, walletAddress])
+
+  useEffect(() => {
+    const input = recipient.trim()
+    const requestId = quoteRequestId.current + 1
+    quoteRequestId.current = requestId
+
+    setBackendQuote(null)
+    setBackendQuoteError('')
+
+    if (!input || !derivedSolAmount || amountLamports === null || !shouldAutoResolveRecipient(input)) {
+      setLoadingBackendQuote(false)
+      return
+    }
+
+    setLoadingBackendQuote(true)
+    const timer = setTimeout(() => {
+      void quoteTransfer({
+        recipient: input,
+        amount: derivedSolAmount,
+        note: note.trim() || undefined,
+        chain: 'SOL',
+      })
+        .then((quote) => {
+          if (quoteRequestId.current !== requestId) return
+          setBackendQuote(quote)
+          setBackendQuoteError('')
+        })
+        .catch((err) => {
+          if (quoteRequestId.current !== requestId) return
+          setBackendQuote(null)
+          setBackendQuoteError(err instanceof Error ? err.message : 'Transfer quote failed.')
+        })
+        .finally(() => {
+          if (quoteRequestId.current === requestId) {
+            setLoadingBackendQuote(false)
+          }
+        })
+    }, 260)
+
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [amountLamports, derivedSolAmount, note, quoteTransfer, recipient])
 
   const useBeneficiary = (entry: Beneficiary) => {
     setRecipient(entry.handle)
@@ -2702,23 +2789,47 @@ function SendScreen() {
     setSending(true)
 
     try {
-      const resolved = await performResolve(normalizedRecipient)
-      if (wallet.address === resolved.address) {
+      const quote = await quoteTransfer({
+        recipient: normalizedRecipient,
+        amount: normalizedAmount,
+        note: normalizedNote || undefined,
+        chain: 'SOL',
+      })
+      setBackendQuote(quote)
+      setBackendQuoteError('')
+
+      if (!serviceFeeCurrencySupported(quote)) {
+        throw new Error(`Service fee currency ${quote.serviceFee.feeCurrency} is not supported by this mobile send flow yet.`)
+      }
+
+      if (serviceFeeNeedsSettlement(quote) && !quote.serviceFee.treasuryAddress) {
+        throw new Error('Service fee treasury is not configured. Please try again later.')
+      }
+
+      const resolved = await performResolve(normalizedRecipient).catch(() => ({
+        address: quote.toAddress,
+        resolvedHandle: quote.recipientHandle ?? undefined,
+        resolvedDisplayName: undefined,
+        resolvedAvatarUrl: null,
+      }))
+
+      if (wallet.address === quote.toAddress) {
         setError('You cannot send crypto to your own wallet.')
         return
       }
 
       const txSignature = await sendSolTransfer({
         wallet,
-        toAddress: resolved.address,
-        amount: normalizedAmount,
+        toAddress: quote.toAddress,
+        amount: quote.amount,
         rpcUrl: api.solanaRpcUrl,
       })
 
+      let transferRecord: TransferRecord
       try {
-        await sendTransferIntent({
+        transferRecord = await sendTransferIntent({
           recipient: normalizedRecipient,
-          amount: normalizedAmount,
+          amount: quote.amount,
           note: normalizedNote || undefined,
           chain: 'SOL',
           txSignature,
@@ -2747,13 +2858,47 @@ function SendScreen() {
         return
       }
 
+      let serviceFeeDetail = ''
+      if (serviceFeeNeedsSettlement(quote)) {
+        try {
+          const feeSignature = await sendSolTransfer({
+            wallet,
+            toAddress: quote.serviceFee.treasuryAddress!,
+            amount: quote.serviceFee.serviceFeeAmount,
+            rpcUrl: api.solanaRpcUrl,
+          })
+
+          await settleServiceFeePayment(transferRecord.id, feeSignature, 'SOL')
+          serviceFeeDetail = `Service fee settled: ${shortAddress(feeSignature, 8, 8)}`
+        } catch (feeError) {
+          openTransferModal({
+            status: 'warning',
+            title: 'Transfer Confirmed, Fee Pending',
+            subtitle: 'Account sent',
+            recipientLabel: resolved.resolvedHandle ?? quote.recipientHandle ?? shortAddress(quote.toAddress, 6, 6),
+            recipientAvatarUrl: resolved.resolvedAvatarUrl ?? null,
+            signature: txSignature,
+            detail: feeError instanceof Error ? feeError.message : 'Service fee settlement failed.',
+          })
+
+          setRecipient('')
+          setAmount('')
+          setNote('')
+          clearResolvedPreview()
+          setRecipientResolveError('')
+          void loadWalletBalance()
+          return
+        }
+      }
+
       openTransferModal({
         status: 'success',
         title: 'Transfer Confirmed',
         subtitle: 'Account sent',
-        recipientLabel: resolved.resolvedHandle ?? shortAddress(resolved.address, 6, 6),
+        recipientLabel: resolved.resolvedHandle ?? quote.recipientHandle ?? shortAddress(quote.toAddress, 6, 6),
         recipientAvatarUrl: resolved.resolvedAvatarUrl ?? null,
         signature: txSignature,
+        detail: serviceFeeDetail || undefined,
       })
 
       setRecipient('')
@@ -2761,6 +2906,7 @@ function SendScreen() {
       setNote('')
       clearResolvedPreview()
       setRecipientResolveError('')
+      void loadWalletBalance()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transfer failed.')
     } finally {
@@ -2927,7 +3073,13 @@ function SendScreen() {
       {amountPreview ? <Text style={styles.infoText}>{amountPreview}</Text> : null}
       {amountMode === 'USD' && !loadingPrice && priceError ? <Text style={styles.errorTextSmall}>{priceError}</Text> : null}
       {amountLamports !== null ? (
-        <View style={[styles.feeSummaryPanel, hasInsufficientFunds && styles.feeSummaryPanelWarning]}>
+        <View
+          style={[
+            styles.feeSummaryPanel,
+            (hasInsufficientFunds || backendQuoteError || hasUnsupportedServiceFeeCurrency) &&
+              styles.feeSummaryPanelWarning,
+          ]}
+        >
           <View style={styles.feeSummaryRow}>
             <Text style={styles.feeSummaryLabel}>Amount</Text>
             <Text style={styles.feeSummaryValue}>{amountSummary}</Text>
@@ -2938,6 +3090,18 @@ function SendScreen() {
               {loadingFee ? `Calculating... ${feeSummary}` : feeSummary}
             </Text>
           </View>
+          {serviceFeeLamports > 0n ? (
+            <>
+              <View style={styles.feeSummaryRow}>
+                <Text style={styles.feeSummaryLabel}>NUMIA fee</Text>
+                <Text style={styles.feeSummaryValue}>{serviceFeeSummary}</Text>
+              </View>
+              <View style={styles.feeSummaryRow}>
+                <Text style={styles.feeSummaryLabel}>Fee network cost</Text>
+                <Text style={styles.feeSummaryValue}>{serviceFeeNetworkSummary}</Text>
+              </View>
+            </>
+          ) : null}
           <View style={styles.feeSummaryRow}>
             <Text style={styles.feeSummaryLabel}>Total needed</Text>
             <Text style={[styles.feeSummaryValue, hasInsufficientFunds && styles.feeSummaryValueWarning]}>
@@ -2956,6 +3120,17 @@ function SendScreen() {
             </Text>
           ) : null}
           {feeError ? <Text style={styles.feeSummaryMeta}>{feeError}</Text> : null}
+          {loadingBackendQuote ? <Text style={styles.feeSummaryMeta}>Checking NUMIA quote...</Text> : null}
+          {quoteSummary && !loadingBackendQuote ? <Text style={styles.feeSummaryMeta}>{quoteSummary}</Text> : null}
+          {backendQuote?.serviceFee.reason && !loadingBackendQuote ? (
+            <Text style={styles.feeSummaryMeta}>{backendQuote.serviceFee.reason}</Text>
+          ) : null}
+          {hasUnsupportedServiceFeeCurrency ? (
+            <Text style={styles.feeSummaryWarning}>
+              Service fee currency {backendQuote?.serviceFee.feeCurrency} is not supported by this send flow yet.
+            </Text>
+          ) : null}
+          {backendQuoteError ? <Text style={styles.feeSummaryWarning}>{backendQuoteError}</Text> : null}
         </View>
       ) : null}
       <Input label="Memo (optional)" value={note} onChangeText={setNote} placeholder="Dinner split" />
@@ -2985,10 +3160,17 @@ function SendScreen() {
       ) : null}
 
       <AppButton
-        label="Send"
+        label={serviceFeeLamports > 0n ? 'Send + Fee' : 'Send'}
         onPress={() => void handleSend()}
         loading={sending || busy}
-        disabled={!recipient.trim() || !amount.trim() || !isAmountReadyToSend || isSelfRecipient || hasInsufficientFunds}
+        disabled={
+          !recipient.trim() ||
+          !amount.trim() ||
+          !isAmountReadyToSend ||
+          isSelfRecipient ||
+          hasInsufficientFunds ||
+          quoteBlocksSend
+        }
       />
     </Screen>
     <Modal
